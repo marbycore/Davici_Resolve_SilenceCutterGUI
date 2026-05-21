@@ -23,12 +23,64 @@ namespace SilenceCutterGUI
         private ProgressBar progressBar;
         private TextBox txtResultPath;
         
+        private string ffmpegPath = "";
+        private string ffprobePath = "";
         private string lastDirectory = "";
 
         public Form1(string[] args)
         {
             InitializeComponent();
             ParseArgs(args);
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            ExtractEmbeddedFFmpeg();
+        }
+
+        private void ExtractEmbeddedFFmpeg()
+        {
+            try
+            {
+                lblStatus.Text = "ESTADO: Descomprimiendo motor FFmpeg interno (puede tardar unos segundos)...";
+                this.Refresh(); // Force UI update
+
+                string tempDir = Path.Combine(Path.GetTempPath(), "SilenceCutterCores");
+                Directory.CreateDirectory(tempDir);
+
+                ffmpegPath = Path.Combine(tempDir, "ffmpeg.exe");
+                ffprobePath = Path.Combine(tempDir, "ffprobe.exe");
+
+                ExtractResource("SilenceCutterGUI.ffmpeg.exe", ffmpegPath);
+                ExtractResource("SilenceCutterGUI.ffprobe.exe", ffprobePath);
+
+                lblStatus.Text = "Súper-Motor FFmpeg Extraído. Aplicación 100% Autocontenida Lista.";
+                lblStatus.ForeColor = Color.LightGreen;
+            }
+            catch (Exception ex)
+            {
+                btnProcess.Enabled = false;
+                gridCortes.Rows.Add(1, "ERROR FATAL", "DESCOMPRESIÓN", ex.Message, "BLOQUEADO");
+                lblStatus.Text = "ESTADO CRÍTICO: Fallo al extraer dependencias incrustadas.";
+                lblStatus.ForeColor = Color.Red;
+            }
+        }
+
+        private void ExtractResource(string resourceName, string outPath)
+        {
+            // Solo extraemos si no existe o vamos a reescribir, usamos check tonto de nombre
+            if (!File.Exists(outPath))
+            {
+                using (var stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
+                {
+                    if (stream == null) throw new Exception("Recurso " + resourceName + " no fue inyectado en el EXE original.");
+                    using (var fStream = new FileStream(outPath, FileMode.Create))
+                    {
+                        stream.CopyTo(fStream);
+                    }
+                }
+            }
         }
 
         private void InitializeComponent()
@@ -182,32 +234,28 @@ namespace SilenceCutterGUI
             }
         }
 
-        private (List<(double Start, double End)>, double) AnalyzeSilences(string videoPath, string threshold, string duration)
+        private double GetDuration(string videoPath)
         {
-            // Duración total con ffprobe
-            double totalDur = 0.0;
             try {
-                var probeInfo = new ProcessStartInfo("ffprobe",
-                    $"-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"{videoPath}\"")
-                {
-                    RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true
-                };
-                using (var p = Process.Start(probeInfo))
-                {
-                    if (p != null)
-                    {
+                var probeInfo = new ProcessStartInfo(string.IsNullOrEmpty(ffprobePath) ? "ffprobe" : ffprobePath, $"-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"{videoPath}\"")
+                { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+                
+                using (var p = Process.Start(probeInfo)) {
+                    if (p != null) {
                         string res = p.StandardOutput.ReadToEnd().Trim();
-                        double.TryParse(res, NumberStyles.Any, CultureInfo.InvariantCulture, out totalDur);
+                        if (double.TryParse(res, NumberStyles.Any, CultureInfo.InvariantCulture, out double d)) return d;
                     }
                 }
-            } catch { }
+            } catch {}
+            return 0.0;
+        }
 
-            // Detectar silencios con ffmpeg
-            var ffInfo = new ProcessStartInfo("ffmpeg",
-                $"-i \"{videoPath}\" -af silencedetect=noise={threshold}:d={duration} -f null -")
-            {
-                RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true
-            };
+        private (List<(double Start, double End)>, double) AnalyzeSilences(string videoPath, string threshold, string duration)
+        {
+            double totalDur = GetDuration(videoPath);
+            
+            var ffInfo = new ProcessStartInfo(string.IsNullOrEmpty(ffmpegPath) ? "ffmpeg" : ffmpegPath, $"-i \"{videoPath}\" -af silencedetect=noise={threshold}:d={duration} -f null -")
+            { RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
 
             var silencias = new List<(double, double)>();
             using (var p = Process.Start(ffInfo))
