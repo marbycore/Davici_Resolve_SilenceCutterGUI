@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Globalization;
+using System.Text;
 
 namespace SilenceCutterGUI
 {
@@ -22,6 +23,11 @@ namespace SilenceCutterGUI
         private Label lblStatus;
         private ProgressBar progressBar;
         private TextBox txtResultPath;
+        private TextBox txtTranscriptionJson;
+        private Button btnTranscribe;
+        private Button btnDownloadJson;
+        private bool hasGpu = false;
+        
         
         private string ffmpegPath = "";
         private string ffprobePath = "";
@@ -86,7 +92,7 @@ namespace SilenceCutterGUI
         private void InitializeComponent()
         {
             this.Text = "Silence Cutter GUI + CLI (Engine Davinci EDL)";
-            this.Size = new Size(800, 650);
+            this.Size = new Size(800, 800);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(30, 30, 30);
             this.ForeColor = Color.White;
@@ -109,10 +115,13 @@ namespace SilenceCutterGUI
             Label l4 = new Label() { Text = "Offset/Padding (s):", Top = 90, Left = 400, Width = 130, Font = mainFont };
             txtPadding = new TextBox() { Text = "0.15", Top = 90, Left = 530, Width = 60, Font = mainFont, BackColor = Color.FromArgb(50, 50, 50), ForeColor = Color.White };
 
-            btnProcess = new Button() { Text = "⚡ Generar EDL", Top = 85, Left = 610, Width = 140, Height = 35, Font = new Font("Segoe UI", 9F, FontStyle.Bold), BackColor = Color.OrangeRed, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            btnProcess = new Button() { Text = "⚡ Generar EDL", Top = 130, Left = 20, Width = 360, Height = 40, Font = new Font("Segoe UI", 10F, FontStyle.Bold), BackColor = Color.OrangeRed, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             btnProcess.Click += async (s, e) => await ProcessVideo();
 
-            gridCortes = new DataGridView() { Top = 140, Left = 20, Width = 740, Height = 330 };
+            btnTranscribe = new Button() { Text = "🎙️ Transcribir (GPU)", Top = 130, Left = 400, Width = 360, Height = 40, Font = new Font("Segoe UI", 10F, FontStyle.Bold), BackColor = Color.DarkCyan, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Enabled = false };
+            btnTranscribe.Click += async (s, e) => await TranscribeVideo();
+
+            gridCortes = new DataGridView() { Top = 180, Left = 20, Width = 740, Height = 290 };
             gridCortes.BackgroundColor = Color.FromArgb(40, 40, 40);
             gridCortes.ForeColor = Color.Black;
             gridCortes.Columns.Add("Id", "#");
@@ -129,7 +138,14 @@ namespace SilenceCutterGUI
             Label lRes = new Label() { Text = "Salida del Timeline (EDL):", Top = 505, Left = 20, Width = 170, Font = mainFont, ForeColor = Color.Yellow };
             txtResultPath = new TextBox() { Top = 505, Left = 190, Width = 570, Font = new Font("Segoe UI", 9F, FontStyle.Bold), BackColor = Color.FromArgb(20, 20, 20), ForeColor = Color.LimeGreen, ReadOnly = true };
 
-            lblStatus = new Label() { Text = "Estado: Listo para comenzar.", Top = 545, Left = 20, Width = 740, Font = mainFont, ForeColor = Color.LightGray };
+            // Sección de Transcripción
+            Label lTrans = new Label() { Text = "Transcripción Faster-Whisper (JSON):", Top = 540, Left = 20, Width = 300, Font = mainFont, ForeColor = Color.Cyan };
+            txtTranscriptionJson = new TextBox() { Top = 565, Left = 20, Width = 740, Height = 150, Multiline = true, ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 9F), BackColor = Color.Black, ForeColor = Color.FromArgb(0, 255, 0), ReadOnly = false };
+
+            btnDownloadJson = new Button() { Text = "💾 Descargar JSON", Top = 535, Left = 600, Width = 160, Height = 28, Font = new Font("Segoe UI", 9F, FontStyle.Bold), BackColor = Color.MediumSeaGreen, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
+            btnDownloadJson.Click += (s, e) => SaveJsonFile();
+
+            lblStatus = new Label() { Text = "Estado: Verificando GPU...", Top = 725, Left = 20, Width = 740, Font = mainFont, ForeColor = Color.LightGray };
 
             this.Controls.Add(lblTitle);
             this.Controls.Add(l1); this.Controls.Add(txtVideoPath); this.Controls.Add(btnBrowse);
@@ -137,11 +153,47 @@ namespace SilenceCutterGUI
             this.Controls.Add(l3); this.Controls.Add(txtDuration);
             this.Controls.Add(l4); this.Controls.Add(txtPadding);
             this.Controls.Add(btnProcess);
+            this.Controls.Add(btnTranscribe);
             this.Controls.Add(gridCortes);
             this.Controls.Add(progressBar);
             this.Controls.Add(lRes); this.Controls.Add(txtResultPath);
+            this.Controls.Add(lTrans); this.Controls.Add(txtTranscriptionJson);
+            this.Controls.Add(btnDownloadJson);
             this.Controls.Add(lblStatus);
+
+            CheckGpu();
         }
+
+        private void CheckGpu()
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo("nvidia-smi", "--query-gpu=name --format=csv,noheader")
+                {
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    string output = p.StandardOutput.ReadToEnd().Trim();
+                    if (!string.IsNullOrEmpty(output))
+                    {
+                        hasGpu = true;
+                        btnTranscribe.Enabled = true;
+                        btnTranscribe.Text = "🚀 Transcribir (GPU)";
+                        lblStatus.Text = "Estado: GPU Detectada: " + output;
+                    }
+                }
+            }
+            catch
+            {
+                btnTranscribe.Enabled = false;
+                btnTranscribe.Text = "❌ No GPU";
+                lblStatus.Text = "Estado: No se detectó GPU NVIDIA (Whisper local desactivado).";
+            }
+        }
+        
 
         private void ParseArgs(string[] args)
         {
@@ -357,6 +409,130 @@ namespace SilenceCutterGUI
             }
 
             return keeps.Count;
+        }
+
+        private async Task TranscribeVideo()
+        {
+            if (string.IsNullOrWhiteSpace(txtVideoPath.Text) || !File.Exists(txtVideoPath.Text))
+            {
+                MessageBox.Show("Ruta de archivo de video no válida.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            btnTranscribe.Enabled = false;
+            txtTranscriptionJson.Text = "--- LOGS DE PROCESO ---\r\n";
+            btnDownloadJson.Visible = false;
+            lblStatus.Text = "Estado: Iniciando motor Whisper...";
+            progressBar.Style = ProgressBarStyle.Marquee;
+
+            try
+            {
+                string video = txtVideoPath.Text;
+                string scriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "transcribir_whisper.py");
+                
+                if (!File.Exists(scriptPath)) 
+                    scriptPath = Path.Combine(Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory).Parent.Parent.Parent.FullName, "transcribir_whisper.py");
+
+                if (!File.Exists(scriptPath))
+                    scriptPath = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "transcribir_whisper.py");
+
+                string pythonPath = "python";
+                string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                string[] possiblePaths = new string[] {
+                    Path.Combine(userProfile, "Miniconda3", "python.exe"),
+                    Path.Combine(userProfile, "miniconda3", "python.exe"),
+                    "C:\\Users\\marco\\Miniconda3\\python.exe",
+                    "python"
+                };
+
+                foreach (var path in possiblePaths) {
+                    if (path == "python" || File.Exists(path)) {
+                        pythonPath = path;
+                        if (path != "python") break;
+                    }
+                }
+
+                StringBuilder fullOutput = new StringBuilder();
+                
+                await Task.Run(() => {
+                    ProcessStartInfo psi = new ProcessStartInfo(pythonPath, $"\"{scriptPath}\" \"{video}\"")
+                    {
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        StandardOutputEncoding = System.Text.Encoding.UTF8
+                    };
+
+                    using (Process p = new Process())
+                    {
+                        p.StartInfo = psi;
+                        p.OutputDataReceived += (s, ev) => {
+                            if (!string.IsNullOrEmpty(ev.Data)) {
+                                fullOutput.AppendLine(ev.Data);
+                                this.Invoke(new Action(() => {
+                                    txtTranscriptionJson.AppendText(ev.Data + "\r\n");
+                                    if (ev.Data.Contains("s]")) lblStatus.Text = "Progreso: " + ev.Data;
+                                }));
+                            }
+                        };
+                        p.ErrorDataReceived += (s, ev) => {
+                            if (!string.IsNullOrEmpty(ev.Data)) {
+                                fullOutput.AppendLine(ev.Data);
+                                this.Invoke(new Action(() => txtTranscriptionJson.AppendText("ERR: " + ev.Data + "\r\n")));
+                            }
+                        };
+
+                        p.Start();
+                        p.BeginOutputReadLine();
+                        p.BeginErrorReadLine();
+                        p.WaitForExit();
+                    }
+                });
+
+                string finalStr = fullOutput.ToString();
+                if (finalStr.Contains("---JSON_START---"))
+                {
+                    string content = finalStr.Split(new[] { "---JSON_START---" }, StringSplitOptions.None)[1]
+                                          .Split(new[] { "---JSON_END---" }, StringSplitOptions.None)[0].Trim();
+                    
+                    txtTranscriptionJson.Text = content;
+                    btnDownloadJson.Visible = true;
+                    lblStatus.Text = "¡Transcripción completada con éxito!";
+                }
+                else
+                {
+                    lblStatus.Text = "Error en la transcripción. Revisa los logs.";
+                }
+            }
+            catch (Exception ex)
+            {
+                lblStatus.Text = "Error: " + ex.Message;
+                txtTranscriptionJson.AppendText("\nEXCEPTION: " + ex.Message);
+            }
+            finally
+            {
+                progressBar.Style = ProgressBarStyle.Continuous;
+                btnTranscribe.Enabled = true;
+            }
+        }
+
+        private void SaveJsonFile()
+        {
+            try
+            {
+                string video = txtVideoPath.Text;
+                string videoDir = Path.GetDirectoryName(video) ?? "";
+                string videoName = Path.GetFileNameWithoutExtension(video);
+                string jsonPath = Path.Combine(videoDir, videoName + "_transcript.json");
+
+                File.WriteAllText(jsonPath, txtTranscriptionJson.Text);
+                MessageBox.Show($"Archivo guardado en:\n{jsonPath}", "Éxito", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error al guardar: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
     }
 }
