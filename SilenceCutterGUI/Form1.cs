@@ -664,7 +664,7 @@ namespace SilenceCutterGUI
             {
                 using (var client = new HttpClient())
                 {
-                    client.Timeout = TimeSpan.FromMinutes(5);
+                    client.Timeout = TimeSpan.FromMinutes(20); // Ampliado para modelos grandes (35B+)
                     
                     var prompt = "ACTÚA COMO UN EDITOR EXPERTO EN VIDEOS CORTOS (REELS/SHORTS). " +
                                  "Tu objetivo es encontrar los 5 momentos más impactantes de este podcast. " +
