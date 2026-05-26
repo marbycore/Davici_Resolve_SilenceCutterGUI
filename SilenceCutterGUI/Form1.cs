@@ -533,11 +533,15 @@ namespace SilenceCutterGUI
 
                 string pythonPath = "python";
                 string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                // Búsqueda portable: cubre Miniconda3, Anaconda3 en cualquier usuario de Windows
                 string[] possiblePaths = new string[] {
                     Path.Combine(userProfile, "Miniconda3", "python.exe"),
                     Path.Combine(userProfile, "miniconda3", "python.exe"),
-                    "C:\\Users\\marco\\Miniconda3\\python.exe",
-                    "python"
+                    Path.Combine(userProfile, "Anaconda3", "python.exe"),
+                    Path.Combine(userProfile, "anaconda3", "python.exe"),
+                    Path.Combine("C:\\", "ProgramData", "Miniconda3", "python.exe"),
+                    Path.Combine("C:\\", "ProgramData", "Anaconda3", "python.exe"),
+                    "python" // Último recurso: PATH del sistema
                 };
 
                 foreach (var path in possiblePaths) {
